@@ -36,7 +36,6 @@ Event EVENTS[] = {
   { "13:55:50", CLOSED },
   { "16:00:00", OPENED },
   { "19:00:00", CLOSED }
- 
 };
 
 Servo stirServo;
@@ -49,6 +48,8 @@ bool door_is_opened = false;
 
 void open();
 void close();
+void servo_on();
+void servo_off();
 void get_next_event(DateTime now, Event *next_event, DateTime *event_time );
 
 void setup() {
@@ -76,7 +77,21 @@ void rtc_isr()  {
   }
 }
 
-void button_isr()  {
+void servo_on() {
+  pinMode(SERVO, OUTPUT);
+  digitalWrite(FET, LOW);
+  delay(200);
+  stirServo.attach(SERVO);
+}
+
+void servo_off() {
+  stirServo.detach();
+  pinMode(SERVO, INPUT_PULLUP); // Limit current drain from servo when its GND is cut by the nFET
+  digitalWrite(FET, HIGH);
+  delay(200);
+}
+
+void button_isr() {
   if( button_pressed == 0 ) {
     button_pressed++;
   }
@@ -112,8 +127,6 @@ void loop() {
 
     Serial.println("Going to sleep");
     Serial.flush();
-    digitalWrite(FET, LOW);
-    delay(200);
     digitalWrite(LED, LOW);
     LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
 
@@ -122,8 +135,6 @@ void loop() {
     detachInterrupt(digitalPinToInterrupt(BUTTON_INTERRUPT_PIN));
 
     digitalWrite(LED, HIGH);
-    digitalWrite(FET, HIGH);
-    delay(200);
     DateTime now = rtc.now();
     Serial.print("Woke up at: ");
     Serial.println(now.toString(buf));
@@ -197,10 +208,10 @@ void get_next_event(DateTime now, Event *next_event, DateTime *event_time )
 }
 
 void servo_move_to(int pos) {
-  stirServo.attach(SERVO);
+  servo_on();
   stirServo.write(pos);
   delay(1000); // give time for the servo to reach position
-  stirServo.detach();
+  servo_off();
 }
 
 void close() {
