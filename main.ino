@@ -10,21 +10,46 @@
 #define LED 13
 #define SERVO 7
 
-#define SERVO_OPENED_POS 110    // degree
-#define SERVO_CLOSED_POS 0      // degree
-#define SERVO_OPEN_TIME  5000   // millisec
+#define SERVO_OPENED_POS 110    // degrees
+#define SERVO_CLOSED_POS 0      // degrees
 
-int32_t WAKEUP_TIMES[] = { 3*60, 8*60, 15*60 }; // Minute in the day, ascending
+typedef enum _State {
+  OPENED,
+  CLOSED
+} State;
+
+typedef struct _Event {
+  const char* time;     // time of the day, format hh:mm:ss
+  State desired_state;  // OPENED or CLOSED
+} Event;
+
+// Chronologically ascending events, othewise it won't work
+Event EVENTS[] = {
+  { "06:30:00", OPENED },
+  { "06:30:40", CLOSED },
+  { "07:30:00", OPENED },
+  { "07:30:40", CLOSED },
+  { "08:30:00", OPENED },
+  { "08:30:40", CLOSED },
+  { "09:30:00", OPENED },
+  { "09:30:40", CLOSED },
+  { "10:30:00", OPENED },
+  { "10:30:40", CLOSED },
+  { "11:30:00", OPENED },
+  { "11:30:40", CLOSED }
+};
 
 Servo stirServo;
 RTC_DS3231 rtc;
+Event current_event;
+int button_pressed = 0;
+int rtc_alarmed = 0;
 
 bool door_is_opened = false;
 
-void isr();
 void open();
 void close();
-DateTime get_next_alarm_time(DateTime now);
+void get_next_event(DateTime now, Event *next_event, DateTime *event_time );
 
 void setup() {
   pinMode(LED, OUTPUT);
@@ -36,30 +61,53 @@ void setup() {
   delay(200);
   Serial.println("Arduino Starting");
   rtc = RTC_DS3231();
+  for(int i = 1; i < 3; i++) {
+    rtc.clearAlarm(i);
+    rtc.disableAlarm(i);
+  }
   servo_move_to(SERVO_CLOSED_POS); // reset servo to position 0
   set_next_alarm();
 }
 
-void isr()  {
-  // doing nothing
+void rtc_isr()  {
+  if( rtc_alarmed == 0 ) {
+    rtc_alarmed++;
+  }
+}
+
+void button_isr()  {
+  if( button_pressed == 0 ) {
+    button_pressed++;
+  }
 }
 
 void set_next_alarm() {
   char now_buf[] = "DDD, DD MMM YYYY hh:mm:ss";
+  char event_buf[] = "DDD, DD MMM YYYY hh:mm:ss";
+  int result;
+  DateTime event_time;
   DateTime now = rtc.now();
+
+  get_next_event(now, &current_event, &event_time);
+  rtc.clearAlarm(1);
+  result = rtc.setAlarm1(event_time, DS3231_A1_Date);
+  if( result != true ) {
+     Serial.println("Failed to set Alarm1");
+  }
 
   Serial.print("Current time: ");
   Serial.println(now.toString(now_buf));
 
-  DateTime next_alarm = get_next_alarm_time(now);
-  rtc.clearAlarm(1);
-  rtc.setAlarm1(next_alarm, DS3231_A1_Date);
+  Serial.print("Next event: ");
+  Serial.print(current_event.desired_state == OPENED ? "OPEN" : "CLOSE");
+  Serial.print(" at ");
+  Serial.println(event_time.toString(event_buf));
 }
 
 void loop() {
     char buf[] = "DDD, DD MMM YYYY hh:mm:ss";
-    attachInterrupt(digitalPinToInterrupt(RTC_INTERRUPT_PIN), isr, FALLING);
-    attachInterrupt(digitalPinToInterrupt(BUTTON_INTERRUPT_PIN), isr, FALLING);
+    attachInterrupt(digitalPinToInterrupt(RTC_INTERRUPT_PIN), rtc_isr, FALLING);
+    attachInterrupt(digitalPinToInterrupt(BUTTON_INTERRUPT_PIN), button_isr, FALLING);
 
     Serial.println("Going to sleep");
     Serial.flush();
@@ -68,50 +116,77 @@ void loop() {
     // woke up
     detachInterrupt(digitalPinToInterrupt(RTC_INTERRUPT_PIN));
     detachInterrupt(digitalPinToInterrupt(BUTTON_INTERRUPT_PIN));
+
     DateTime now = rtc.now();
     Serial.print("Woke up at: ");
     Serial.println(now.toString(buf));
 
-    open();
-    delay(SERVO_OPEN_TIME);
-    close();
-    set_next_alarm();
+    if( button_pressed ) {
+      if(door_is_opened) {
+        close();
+      } else {
+        open();
+      }
+      button_pressed = 0;
+    }
+
+    if( rtc_alarmed ) {
+      if( current_event.desired_state == OPENED ) {
+        open();
+      }
+      if( current_event.desired_state == CLOSED ) {
+        close();
+      }
+      set_next_alarm();
+      rtc_alarmed = 0;
+    }
 }
 
-DateTime get_next_alarm_time(DateTime now)
-{
-  int32_t next_wakeup_minute = WAKEUP_TIMES[0];
-  int32_t current_minute;
-  int32_t next_alarm_minute;
-  int32_t offset_sec;
-  char buffer[] = "DDD, DD MMM YYYY hh:mm:ss";
-  DateTime next_alarm;
+int32_t get_event_sod(Event event) {
+  int min, hour, sec;
+  if( 3 != sscanf(event.time, "%02d:%02d:%02d", &hour, &min, &sec) ) {
+    Serial.print("Invalid time format for event with time : ");
+    Serial.println(event.time);
 
-  now = now - TimeSpan(0, 0, 0, now.second());
+     return 0;
+  }
+
+  return TimeSpan(0, hour, min, sec).totalseconds();
+}
+
+void get_next_event(DateTime now, Event *next_event, DateTime *event_time )
+{
+  int32_t current_sod, next_sod, next_alarm_sod, event_sod; // second of the day
+  int min, hour, sec;
+  DateTime next_event_time;
+  int32_t offset_sec;
 
   // Get current time and set alarm to a time to wake
-  current_minute = now.minute() + now.hour() * 60;
+  current_sod = TimeSpan(0, now.hour(), now.minute(), now.second()).totalseconds();
 
-  for(int idx = 0;idx < sizeof(WAKEUP_TIMES)/sizeof(*WAKEUP_TIMES); idx++) {
-    if(current_minute < WAKEUP_TIMES[idx]) {
-      next_wakeup_minute = WAKEUP_TIMES[idx];
+  *next_event = EVENTS[0]; // earliest event in the day
+  for(int idx = 0;idx < sizeof(EVENTS)/sizeof(*EVENTS); idx++) {
+    event_sod = get_event_sod(EVENTS[idx]);
+    if(current_sod < event_sod ) {
+      // we found an event later today
+      *next_event = EVENTS[idx];
       break;
     }
   }
+  next_sod = get_event_sod(*next_event);
 
-  next_alarm_minute = next_wakeup_minute-current_minute;
-  if(next_alarm_minute >= 0) {
+  next_alarm_sod = next_sod-current_sod;
+  if(next_alarm_sod >= 0) {
     // Later today: now + delta
-    offset_sec = next_alarm_minute*60;
+    offset_sec = next_alarm_sod;
   } else {
     // Tomorrow: now + 24h + (negative delta)
-    offset_sec = (24L*60L+next_alarm_minute)*60;
+    offset_sec = 24L*60L*60L+next_alarm_sod;
   }
 
-  Serial.print("Next alarm at: ");
-  next_alarm = now + TimeSpan(offset_sec);
-  Serial.println(next_alarm.toString(buffer));
-  return next_alarm;
+  *event_time = now + TimeSpan(offset_sec);
+
+  return;
 }
 
 void servo_move_to(int pos) {
