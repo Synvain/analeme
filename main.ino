@@ -17,6 +17,7 @@ int32_t WAKEUP_TIMES[] = { 3*60, 8*60, 15*60 }; // Minute in the day, ascending
 
 Servo stirServo;
 int isr_counts = 0;
+int servo_pos = 0;
 bool door_is_opened = false;
 
 void schedule_next();
@@ -109,21 +110,22 @@ TimeSpan get_next_alarm_offset(DateTime now)
   return offset_sec;
 }
 
-void servo_move_to(int to_pos) {
+void servo_move_to(int pos) {
   stirServo.attach(SERVO);
-  int current_pos = stirServo.read();
-  for(int pos=current_pos;;) {
+  // int current_pos = servo_pos;
+  // for(int pos=current_pos;;) {
     stirServo.write(pos);
-    delay(5);
-    if(current_pos>to_pos)
-      pos--;
-    else
-      pos++;
-    if(pos==to_pos)
-      break;
-  }
-  delay(50); // give time for the servo command to go flush out
+  //   delay(5);
+  //   if(pos==to_pos)
+  //     break;
+  //   else if(current_pos>to_pos)
+  //     pos--;
+  //   else
+  //     pos++;
+  // }
+  delay(1000); // give time for the servo to reach position
   stirServo.detach();
+  // servo_pos = to_pos;
 }
 
 void close() {
@@ -150,11 +152,9 @@ class DateTime rtc_read() {
   } else {
     if (RTC.chipPresent()) {
       Serial.println("The DS1307 is stopped.  Please run the SetTime");
-      Serial.println("example to initialize the time and begin running.");
-      Serial.println();
+      Serial.println("example to initialize the time and begin running.\n");
     } else {
-      Serial.println("DS1307 read error!  Please check the circuitry.");
-      Serial.println();
+      Serial.println("DS1307 read error!  Please check the circuitry.\n");
     }
   }
   now = DateTime(tm.Year-30 /* 1970vs2000 */, tm.Month, tm.Day, tm.Hour, tm.Minute, tm.Second);
