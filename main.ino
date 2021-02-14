@@ -1,11 +1,12 @@
-#include "RTClib.h"
-#include <DeepSleepScheduler.h>
-#include <Servo.h>
+#include <RTClib.h>
 #include <TimeLib.h>
 #include <Time.h>
-#include <DS1307RTC.h> // Real Time Clock Library
+#include <DS1307RTC.h> // Required even if not used
+#include <Servo.h>
+#include <LowPower.h>
 
-#define INTERRUPT_PIN 2
+#define BUTTON_INTERRUPT_PIN 2
+#define RTC_INTERRUPT_PIN 3
 #define LED 13
 #define SERVO 7
 
@@ -16,72 +17,75 @@
 int32_t WAKEUP_TIMES[] = { 3*60, 8*60, 15*60 }; // Minute in the day, ascending
 
 Servo stirServo;
-int isr_counts = 0;
-int servo_pos = 0;
+RTC_DS3231 rtc;
+
 bool door_is_opened = false;
 
-void schedule_next();
 void isr();
-void scheduled();
 void open();
 void close();
-void button();
-class DateTime rtc_read();
-TimeSpan get_next_alarm_offset(DateTime now);
+DateTime get_next_alarm_time(DateTime now);
 
 void setup() {
   pinMode(LED, OUTPUT);
-  pinMode(SERVO, OUTPUT); //test d'activation de pin pour le moteur
-  pinMode(INTERRUPT_PIN, INPUT_PULLUP);
+  pinMode(SERVO, OUTPUT);
+  pinMode(BUTTON_INTERRUPT_PIN, INPUT_PULLUP);
+  pinMode(RTC_INTERRUPT_PIN, INPUT_PULLUP);
   Serial.begin(115200);
   while (!Serial) ; // wait for serial
   delay(200);
   Serial.println("Arduino Starting");
-  Serial.flush();
+  rtc = RTC_DS3231();
   servo_move_to(SERVO_CLOSED_POS); // reset servo to position 0
-  schedule_next();
-  attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), isr, FALLING);
+  set_next_alarm();
 }
 
 void isr()  {
-  isr_counts++;
-  if(isr_counts == 1) { // debouncing
-    scheduler.schedule(button);
-  }
+  // doing nothing
 }
 
-void button() {
-  open();
-  isr_counts=0;
-}
+void set_next_alarm() {
+  char now_buf[] = "DDD, DD MMM YYYY hh:mm:ss";
+  DateTime now = rtc.now();
 
-void scheduled() {
-  open();
-  schedule_next();
-}
+  Serial.print("Current time: ");
+  Serial.println(now.toString(now_buf));
 
-void schedule_next() {
-  DateTime now;
-  TimeSpan next_alarm;
-
-  //now = DateTime(2020, 12, 19, 7, 00, 00); // for testing
-  now = rtc_read();
-  next_alarm = get_next_alarm_offset(now);
-
-  scheduler.scheduleDelayed(scheduled, next_alarm.totalseconds()*1000);
+  DateTime next_alarm = get_next_alarm_time(now);
+  rtc.clearAlarm(1);
+  rtc.setAlarm1(next_alarm, DS3231_A1_Date);
 }
 
 void loop() {
-  scheduler.execute();
+    char buf[] = "DDD, DD MMM YYYY hh:mm:ss";
+    attachInterrupt(digitalPinToInterrupt(RTC_INTERRUPT_PIN), isr, FALLING);
+    attachInterrupt(digitalPinToInterrupt(BUTTON_INTERRUPT_PIN), isr, FALLING);
+
+    Serial.println("Going to sleep");
+    Serial.flush();
+    LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
+
+    // woke up
+    detachInterrupt(digitalPinToInterrupt(RTC_INTERRUPT_PIN));
+    detachInterrupt(digitalPinToInterrupt(BUTTON_INTERRUPT_PIN));
+    DateTime now = rtc.now();
+    Serial.print("Woke up at: ");
+    Serial.println(now.toString(buf));
+
+    open();
+    delay(SERVO_OPEN_TIME);
+    close();
+    set_next_alarm();
 }
 
-TimeSpan get_next_alarm_offset(DateTime now)
+DateTime get_next_alarm_time(DateTime now)
 {
   int32_t next_wakeup_minute = WAKEUP_TIMES[0];
   int32_t current_minute;
   int32_t next_alarm_minute;
   int32_t offset_sec;
   char buffer[] = "DDD, DD MMM YYYY hh:mm:ss";
+  DateTime next_alarm;
 
   now = now - TimeSpan(0, 0, 0, now.second());
 
@@ -105,9 +109,9 @@ TimeSpan get_next_alarm_offset(DateTime now)
   }
 
   Serial.print("Next alarm at: ");
-  Serial.println((now + TimeSpan(offset_sec)).toString(buffer));
-  delay(1000);
-  return offset_sec;
+  next_alarm = now + TimeSpan(offset_sec);
+  Serial.println(next_alarm.toString(buffer));
+  return next_alarm;
 }
 
 void servo_move_to(int pos) {
@@ -131,23 +135,4 @@ void open() {
   Serial.println("Opening door...");
   servo_move_to(SERVO_OPENED_POS);
   door_is_opened = true;
-  scheduler.scheduleDelayed(close, SERVO_OPEN_TIME);
-}
-
-class DateTime rtc_read() {
-  tmElements_t tm;
-  DateTime now;
-  char buffer[] = "DDD, DD MMM YYYY hh:mm:ss";
-  if (RTC.read(tm)) {
-  } else {
-    if (RTC.chipPresent()) {
-      Serial.println("The DS1307 is stopped.  Please run the SetTime");
-      Serial.println("example to initialize the time and begin running.\n");
-    } else {
-      Serial.println("DS1307 read error!  Please check the circuitry.\n");
-    }
-  }
-  now = DateTime(tm.Year-30 /* 1970vs2000 */, tm.Month, tm.Day, tm.Hour, tm.Minute, tm.Second);
-  Serial.println(now.toString(buffer));
-  return now;
 }
