@@ -36,9 +36,8 @@ void setup() {
   while (!Serial) ; // wait for serial
   delay(200);
   Serial.println("Arduino Starting");
-  stirServo.attach(SERVO);
-  stirServo.write(SERVO_CLOSED_POS); // reset servo to position 0
-  delay(1000);
+  Serial.flush();
+  servo_move_to(SERVO_CLOSED_POS); // reset servo to position 0
   schedule_next();
   attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), isr, FALLING);
 }
@@ -110,14 +109,27 @@ TimeSpan get_next_alarm_offset(DateTime now)
   return offset_sec;
 }
 
+void servo_move_to(int to_pos) {
+  stirServo.attach(SERVO);
+  int current_pos = stirServo.read();
+  for(int pos=current_pos;;) {
+    stirServo.write(pos);
+    delay(5);
+    if(current_pos>to_pos)
+      pos--;
+    else
+      pos++;
+    if(pos==to_pos)
+      break;
+  }
+  delay(50); // give time for the servo command to go flush out
+  stirServo.detach();
+}
+
 void close() {
   if(!door_is_opened) return;
   Serial.println("Closing door...");
-  for(int pos = SERVO_OPENED_POS; pos>=SERVO_CLOSED_POS; pos-=1)  {
-    stirServo.write(pos);
-    delay(5);
-  }
-  delay(1000); // give time for the servo command to go flush out
+  servo_move_to(SERVO_CLOSED_POS);
   door_is_opened = false;
 }
 
@@ -125,11 +137,7 @@ void open() {
   if(door_is_opened) return;
   digitalWrite(LED, HIGH);
   Serial.println("Opening door...");
-  for(int pos = SERVO_CLOSED_POS; pos <= SERVO_OPENED_POS; pos += 1) {
-    stirServo.write(pos);
-    delay(5);
-  }
-  delay(1000); // give time for the servo command to flush out
+  servo_move_to(SERVO_OPENED_POS);
   door_is_opened = true;
   scheduler.scheduleDelayed(close, SERVO_OPEN_TIME);
 }
