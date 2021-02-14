@@ -111,12 +111,14 @@ void loop() {
 
     Serial.println("Going to sleep");
     Serial.flush();
+    digitalWrite(LED, LOW);
     LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
 
     // woke up
     detachInterrupt(digitalPinToInterrupt(RTC_INTERRUPT_PIN));
     detachInterrupt(digitalPinToInterrupt(BUTTON_INTERRUPT_PIN));
 
+    digitalWrite(LED, HIGH);
     DateTime now = rtc.now();
     Serial.print("Woke up at: ");
     Serial.println(now.toString(buf));
@@ -200,13 +202,11 @@ void close() {
   if(!door_is_opened) return;
   Serial.println("Closing door...");
   servo_move_to(SERVO_CLOSED_POS);
-  digitalWrite(LED, LOW);
   door_is_opened = false;
 }
 
 void open() {
   if(door_is_opened) return;
-  digitalWrite(LED, HIGH);
   Serial.println("Opening door...");
   servo_move_to(SERVO_OPENED_POS);
   door_is_opened = true;
