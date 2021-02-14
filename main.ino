@@ -79,7 +79,7 @@ void rtc_isr()  {
 
 void servo_on() {
   pinMode(SERVO, OUTPUT);
-  digitalWrite(FET, LOW);
+  digitalWrite(FET, HIGH);
   delay(200);
   stirServo.attach(SERVO);
 }
@@ -87,7 +87,7 @@ void servo_on() {
 void servo_off() {
   stirServo.detach();
   pinMode(SERVO, INPUT_PULLUP); // Limit current drain from servo when its GND is cut by the nFET
-  digitalWrite(FET, HIGH);
+  digitalWrite(FET, LOW);
   delay(200);
 }
 
