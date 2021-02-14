@@ -8,9 +8,10 @@
 #define BUTTON_INTERRUPT_PIN 2
 #define RTC_INTERRUPT_PIN 3
 #define LED 13
-#define SERVO 7
+#define FET 7
+#define SERVO 4
 
-#define SERVO_OPENED_POS 110    // degrees
+#define SERVO_OPENED_POS 60     // degrees
 #define SERVO_CLOSED_POS 0      // degrees
 
 typedef enum _State {
@@ -25,18 +26,17 @@ typedef struct _Event {
 
 // Chronologically ascending events, othewise it won't work
 Event EVENTS[] = {
-  { "06:30:00", OPENED },
-  { "06:30:40", CLOSED },
-  { "07:30:00", OPENED },
-  { "07:30:40", CLOSED },
-  { "08:30:00", OPENED },
-  { "08:30:40", CLOSED },
-  { "09:30:00", OPENED },
-  { "09:30:40", CLOSED },
-  { "10:30:00", OPENED },
-  { "10:30:40", CLOSED },
-  { "11:30:00", OPENED },
-  { "11:30:40", CLOSED }
+  { "05:30:00", OPENED },
+  { "08:30:00", CLOSED },
+  { "09:55:00", OPENED },
+  { "09:55:50", CLOSED },
+  { "11:55:00", OPENED },
+  { "11:55:50", CLOSED },
+  { "13:55:00", OPENED },
+  { "13:55:50", CLOSED },
+  { "16:00:00", OPENED },
+  { "19:00:00", CLOSED }
+ 
 };
 
 Servo stirServo;
@@ -53,6 +53,7 @@ void get_next_event(DateTime now, Event *next_event, DateTime *event_time );
 
 void setup() {
   pinMode(LED, OUTPUT);
+  pinMode(FET, OUTPUT);
   pinMode(SERVO, OUTPUT);
   pinMode(BUTTON_INTERRUPT_PIN, INPUT_PULLUP);
   pinMode(RTC_INTERRUPT_PIN, INPUT_PULLUP);
@@ -92,7 +93,7 @@ void set_next_alarm() {
   rtc.clearAlarm(1);
   result = rtc.setAlarm1(event_time, DS3231_A1_Date);
   if( result != true ) {
-     Serial.println("Failed to set Alarm1");
+    Serial.println("Failed to set Alarm1");
   }
 
   Serial.print("Current time: ");
@@ -111,6 +112,8 @@ void loop() {
 
     Serial.println("Going to sleep");
     Serial.flush();
+    digitalWrite(FET, LOW);
+    delay(200);
     digitalWrite(LED, LOW);
     LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
 
@@ -119,6 +122,8 @@ void loop() {
     detachInterrupt(digitalPinToInterrupt(BUTTON_INTERRUPT_PIN));
 
     digitalWrite(LED, HIGH);
+    digitalWrite(FET, HIGH);
+    delay(200);
     DateTime now = rtc.now();
     Serial.print("Woke up at: ");
     Serial.println(now.toString(buf));
@@ -150,7 +155,7 @@ int32_t get_event_sod(Event event) {
     Serial.print("Invalid time format for event with time : ");
     Serial.println(event.time);
 
-     return 0;
+    return 0;
   }
 
   return TimeSpan(0, hour, min, sec).totalseconds();
